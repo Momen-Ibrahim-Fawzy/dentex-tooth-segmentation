@@ -1,7 +1,8 @@
 """Train a U-Net for one DENTEX task (80/20 train/validation split).
 
-    python scripts/train_unet.py --config configs/unet.yaml --task quadrant
-    python scripts/train_unet.py --config configs/unet.yaml --task border   # {bg, tooth, border} for instances
+    python scripts/train_unet.py --config configs/unet.yaml --task quadrant --binary   # original setup: tooth vs background
+    python scripts/train_unet.py --config configs/unet.yaml --task enumeration         # multi-class: one class per tooth
+    python scripts/train_unet.py --config configs/unet.yaml --task border              # {bg, tooth, border} for instances
 """
 from __future__ import annotations
 
@@ -30,28 +31,33 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", required=True)
     p.add_argument("--task", required=True, choices=["quadrant", "enumeration", "disease", "border"])
+    p.add_argument("--binary", action="store_true", help="tooth vs background (the original course experiments)")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = p.parse_args()
     cfg = yaml.safe_load(open(args.config))
     seed_everything(cfg["seed"])
 
     root = Path(cfg["data_root"].format(task=args.task))
-    if args.task == "border":
+    if args.binary:
+        label_task, num_classes = None, 2
+    elif args.task == "border":
         label_task, num_classes = None, 3
     else:
         label_task, num_classes = args.task, get_task(args.task).num_classes
 
     names = sorted(p.name for p in (root / "images").glob("*.png"))
     train_names, val_names = split_names(names, cfg["val_fraction"], cfg["seed"])
-    train_loader = DataLoader(SegmentationDataset(root, label_task, train_names, augment=True),
+    common = {"task": label_task, "binarize": args.binary}
+    train_loader = DataLoader(SegmentationDataset(root, names=train_names, augment=True, **common),
                               batch_size=cfg["batch_size"], shuffle=True,
                               num_workers=cfg["workers"], drop_last=True)
-    val_loader = DataLoader(SegmentationDataset(root, label_task, val_names),
+    val_loader = DataLoader(SegmentationDataset(root, names=val_names, **common),
                             batch_size=cfg["batch_size"], num_workers=cfg["workers"])
 
     model = UNet(1, num_classes, base=cfg["base_channels"], dropout=cfg["dropout"])
+    run_name = f"{args.task}_binary" if args.binary else args.task
     summary = train(model, train_loader, val_loader, num_classes=num_classes, epochs=cfg["epochs"],
-                    lr=cfg["lr"], out_dir=Path(cfg["output_dir"]) / args.task, device=args.device,
+                    lr=cfg["lr"], out_dir=Path(cfg["output_dir"]) / run_name, device=args.device,
                     patience=cfg["patience"])
     print(summary)
 
