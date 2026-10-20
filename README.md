@@ -104,7 +104,7 @@ src/dentex/
 scripts/  make_masks.py · train_unet.py · prepare_nnsam.py · run_nnsam.sh · predict.py
 configs/unet.yaml
 docs/     results.md · timeline.md · assets/
-tests/    14 unit tests on synthetic data
+tests/    17 unit tests on synthetic data
 ```
 
 ## Usage
@@ -116,7 +116,8 @@ pip install -e ".[dev]"
 python scripts/make_masks.py --task enumeration --refine overlap \
   --json data/DENTEX/training_data/quadrant_enumeration/train_quadrant_enumeration.json \
   --images data/DENTEX/training_data/quadrant_enumeration/xrays --out data/prepared/enumeration
-python scripts/train_unet.py --config configs/unet.yaml --task enumeration
+python scripts/train_unet.py --config configs/unet.yaml --task enumeration --binary   # course setup
+python scripts/train_unet.py --config configs/unet.yaml --task enumeration            # multi-class
 
 pip install git+https://github.com/Kent0n-Li/nnSAM.git
 python scripts/prepare_nnsam.py --prepared data/prepared --nnunet-raw nnsam/nnUNet_raw
