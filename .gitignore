@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.ipynb_checkpoints/
+
+# data, checkpoints and outputs are never committed (DENTEX is CC BY-NC-SA, not redistributed)
+/data/
+/runs/
+/nnsam/
+/results/
+*.pt
+*.pth
+*.npz
+*.zip

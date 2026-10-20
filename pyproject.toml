@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dentex"
+version = "1.0.0"
+description = "DENTEX tooth segmentation, enumeration and diagnosis with U-Net and nnSAM"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Momen Ibrahim Fawzy" }]
+dependencies = ["torch>=1.13", "numpy", "scipy", "pillow", "pyyaml", "tqdm"]
+
+[project.optional-dependencies]
+nnsam = ["nnsam @ git+https://github.com/Kent0n-Li/nnSAM.git"]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
