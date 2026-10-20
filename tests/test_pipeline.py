@@ -11,9 +11,9 @@ import numpy as np
 import torch
 from PIL import Image
 
-from dentex.data.coco import XRay, Annotation, instance_masks, load_dentex, semantic_mask
+from dentex.data.coco import XRay, Annotation, instance_labels, instance_masks, load_dentex, semantic_mask
 from dentex.data.dataset import SegmentationDataset
-from dentex.data.refine import BORDER, TOOTH, add_border_class, remove_overlaps
+from dentex.data.refine import BORDER, TOOTH, add_border_class, remove_overlaps, separate_teeth
 from dentex.export import to_records
 from dentex.labels import decode_enumeration, encode, fdi, hflip_lookup
 from dentex.losses import DiceCELoss
@@ -61,12 +61,24 @@ class TestMasks(unittest.TestCase):
 
     def test_overlap_removal_and_border(self):
         inst = instance_masks(toy_xray())
-        separated = remove_overlaps(inst)
         overlap = inst[0] & inst[1]
         self.assertTrue(overlap.any())
-        self.assertTrue((separated[overlap] == 0).all())
-        three = add_border_class(separated, width=1)
+        self.assertTrue((remove_overlaps(inst)[overlap] == 0).all())
+        three = add_border_class(remove_overlaps(inst), border_size=1)
         self.assertEqual(set(np.unique(three)), {0, TOOTH, BORDER})
+
+    def test_separate_teeth_leaves_a_gap_wider_than_the_overlap(self):
+        inst = instance_masks(toy_xray())
+        separated = separate_teeth(inst, [1, 2], gap=2)
+        overlap = inst[0] & inst[1]
+        self.assertTrue((separated[overlap] == 0).all())
+        cols_with_both = [c for c in range(separated.shape[1]) if (separated[:, c] == 0).all()]
+        self.assertGreater(len(cols_with_both), overlap.any(axis=0).sum())   # gap wider than the raw overlap
+        self.assertEqual(set(np.unique(separated)) - {0}, {1, 2})
+
+    def test_instance_labels_follow_task(self):
+        self.assertEqual(instance_labels(toy_xray(), "quadrant"), [1, 2])
+        self.assertEqual(instance_labels(toy_xray(), "disease"), [2, 0])
 
     def test_load_dentex_json(self):
         data = {"images": [{"id": 7, "file_name": "a.png", "width": 10, "height": 10}],
@@ -144,6 +156,15 @@ class TestData(unittest.TestCase):
             ds = SegmentationDataset(d, "quadrant", augment=True, hflip_p=1.0, noise_p=0.0)
             flipped = ds[0]["mask"].numpy()
         self.assertTrue((flipped[:, 8:] == 2).all())             # moved right *and* relabelled as quadrant 2
+
+    def test_binarize_maps_all_labels_to_tooth(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "images").mkdir()
+            (Path(d) / "masks").mkdir()
+            Image.fromarray(np.zeros((8, 8), np.uint8)).save(Path(d) / "images" / "x.png")
+            Image.fromarray(np.array([[0, 7, 31, 2]] * 8, np.uint8).repeat(2, axis=1)).save(Path(d) / "masks" / "x.png")
+            mask = SegmentationDataset(d, None, binarize=True)[0]["mask"].numpy()
+        self.assertEqual(set(np.unique(mask)), {0, 1})
 
     def test_nnunet_raw_layout(self):
         with tempfile.TemporaryDirectory() as d:
