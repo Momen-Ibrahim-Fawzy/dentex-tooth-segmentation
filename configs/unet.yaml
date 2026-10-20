@@ -1,0 +1,12 @@
+# U-Net training, shared by all tasks (--task selects the data folder and the number of classes)
+seed: 0
+data_root: data/prepared/{task}     # images/ and masks/ from scripts/make_masks.py
+output_dir: runs/unet
+val_fraction: 0.2                   # 80/20 split
+base_channels: 32
+dropout: 0.3
+batch_size: 4
+workers: 4
+lr: 1.0e-4
+epochs: 100
+patience: 15                        # early stopping on validation Dice
