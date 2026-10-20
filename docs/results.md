@@ -1,19 +1,21 @@
 # Results in detail
 
 ## Mask refinement and the U-Net
-U-Net results on the validation split for each stage of mask refinement (foreground vs background):
+Binary Keras U-Net (tooth vs background), final-epoch *training* metrics after 35 epochs on 80% of each subset, for
+each stage of mask refinement:
 
 | Masks | Task | Accuracy | Recall | Specificity | PPV | NPV | IoU | F1 |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | raw polygons | quadrant | 0.964 | 0.932 | 0.977 | 0.937 | 0.974 | 0.877 | 0.934 |
 | raw polygons | quadrant + enumeration | 0.947 | 0.873 | 0.963 | 0.832 | 0.972 | 0.741 | 0.851 |
 | raw polygons | disease | 0.963 | 0.295 | 0.991 | 0.584 | 0.971 | 0.232 | 0.371 |
-| overlaps removed | quadrant | 0.959 | 0.925 | 0.971 | 0.920 | 0.973 | 0.855 | 0.922 |
-| overlaps removed | quadrant + enumeration | 0.927 | 0.816 | 0.948 | 0.747 | 0.965 | 0.639 | 0.779 |
+| teeth separated (6 px gap) | quadrant | 0.959 | 0.925 | 0.971 | 0.920 | 0.973 | 0.855 | 0.922 |
+| teeth separated (6 px gap) | quadrant + enumeration | 0.927 | 0.816 | 0.948 | 0.747 | 0.965 | 0.639 | 0.779 |
 
-Removing overlaps lowers the pixel scores slightly, because the masks now contain thin gaps that are hard to hit
+Separating the teeth lowers the pixel scores slightly, because the masks now contain thin gaps that are hard to hit
 exactly. The payoff is downstream: post-processing on raw-polygon predictions counted 13 teeth where there were
-many more, because neighbouring teeth merged. The border class was introduced to fix exactly that.
+many more, because neighbouring teeth merged. The border class (erode 1 px, dilate 5 px) was introduced to fix
+exactly that: with predicted borders, the tooth cores are separate components that can be counted.
 
 ![U-Net with post-processing to number teeth](assets/unet_tooth_numbering.png)
 

@@ -29,10 +29,15 @@ a frozen Segment-Anything encoder plugged into nnU-Net.
 1. **Masks** (`dentex/data/coco.py`): DENTEX polygons are rasterised into one label map per task
    (4 quadrant, 32 tooth and 4 diagnosis classes), and every pair is resized to 512×512.
 2. **Mask refinement** (`dentex/data/refine.py`): neighbouring teeth overlap in the annotations, so a semantic
-   network merges them. Overlapping pixels become background, and an explicit **border class** is added.
+   network merges them. Each tooth is grown by 6 px and its intersection with already-drawn teeth is cut out,
+   leaving a gap between neighbours. An explicit **border class** is then added: erode 1 px, dilate by 5 px, and
+   label the band in between.
 3. **Models**
-   - **U-Net** (`dentex/models/unet.py`), one model per task, 80/20 split, Dice + cross-entropy loss. Flip
-     augmentation swaps left/right quadrant labels (`labels.hflip_lookup`) so it stays anatomically correct.
+   - **U-Net** (`dentex/models/unet.py`), one model per task. The course experiments trained a binary U-Net
+     (tooth vs background, `--binary`) with Adam, batch size 4, 35 epochs, an 80/20 split, and horizontal flip plus
+     5% salt-and-pepper augmentation. The rewrite also supports multi-class training (one class per quadrant, tooth
+     or diagnosis) with a Dice + cross-entropy loss. Flip augmentation then swaps left/right quadrant labels
+     (`labels.hflip_lookup`) so it stays anatomically correct.
    - **nnSAM** (`dentex/nnsam.py`, `scripts/run_nnsam.sh`): SAM's ViT encoder (frozen) and nnU-Net's encoder run in
      parallel, and their features are concatenated into nnU-Net's decoder. One nnU-Net v2 dataset per task
      (Dataset043/044/045), 5-fold cross-validation, 70 X-rays held out for testing.
@@ -54,21 +59,24 @@ a frozen Segment-Anything encoder plugged into nnU-Net.
 | Enumeration (32 teeth) | **0.7563** | 0.7490 | 0.7240 | 0.6674 | 0.6460 |
 | Disease | **0.5781** | 0.5122 | 0.4671 | 0.3810 | 0.3012 |
 
-**U-Net, foreground segmentation on the validation split**
+**Binary U-Net (tooth vs background), Keras, as run in the course**
 
-| Setting | Accuracy | Recall | Specificity | PPV | NPV | IoU | F1 |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Reproduced tooth U-Net (Helli & Hamamci data) | 0.982 | 0.959 | 0.988 | 0.953 | 0.989 | 0.916 | 0.956 |
-| Same model on DENTEX, no fine-tuning | 0.893 | 0.903 | 0.897 | 0.562 | 0.988 | 0.536 | 0.663 |
-| Trained on DENTEX: quadrant | 0.964 | 0.932 | 0.977 | 0.937 | 0.974 | 0.877 | 0.934 |
-| Trained on DENTEX: quadrant + enumeration | 0.947 | 0.873 | 0.963 | 0.832 | 0.972 | 0.741 | 0.851 |
-| Trained on DENTEX: disease | 0.963 | 0.295 | 0.991 | 0.584 | 0.971 | 0.232 | 0.371 |
+| Setting | Measured on | Accuracy | Recall | Specificity | PPV | NPV | IoU | F1 |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Tooth U-Net of Helli & Hamamci, reproduced on its 116-image dataset | training (epoch 250) | 0.982 | 0.959 | 0.988 | 0.953 | 0.989 | 0.916 | 0.956 |
+| Same model applied to DENTEX, no fine-tuning | DENTEX masks | 0.893 | 0.903 | 0.897 | 0.562 | 0.988 | 0.536 | 0.663 |
+| Trained on DENTEX: quadrant | training (epoch 35) | 0.964 | 0.932 | 0.977 | 0.937 | 0.974 | 0.877 | 0.934 |
+| Trained on DENTEX: quadrant + enumeration | training (epoch 35) | 0.947 | 0.873 | 0.963 | 0.832 | 0.972 | 0.741 | 0.851 |
+| Trained on DENTEX: disease | training (epoch 35) | 0.963 | 0.295 | 0.991 | 0.584 | 0.971 | 0.232 | 0.371 |
+
+The U-Net rows (except the no-fine-tuning row) are final-epoch training metrics. They show how well each mask type
+can be fitted, not generalisation. The nnSAM Dice scores above are measured on held-out cross-validation folds.
 
 What the numbers say:
-- Tooth *presence* is easy (IoU 0.88 for quadrants), and nnSAM reaches Dice 0.92 on quadrants.
-- Telling 32 teeth apart is much harder (Dice 0.76), because neighbouring teeth look alike and touch.
-- Diagnosis is the bottleneck: lesions are small and rare, so recall stays low for both models. This is where more
-  data (the 1,571 unlabeled X-rays) or detection-style heads would help most.
+- Tooth *presence* is easy: the U-Net fits quadrant masks at IoU 0.88, and nnSAM reaches validation Dice 0.92.
+- Telling 32 teeth apart is much harder (validation Dice 0.76), because neighbouring teeth look alike and touch.
+- Diagnosis is the bottleneck: lesions are small and rare, so even the training recall is only 0.30. This is where
+  more data (the 1,571 unlabeled X-rays) or detection-style heads would help most.
 
 | Ground truth vs nnSAM prediction (enumeration) | nnSAM training, quadrant fold 0 |
 |---|---|
