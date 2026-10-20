@@ -5,7 +5,7 @@
         --out data/prepared/enumeration --refine border
 
 --refine none     plain semantic masks
---refine overlap  pixels shared by two teeth become background (separates neighbours)
+--refine overlap  teeth grown by --gap px and their intersections cut out (separates neighbours)
 --refine border   overlap removal + a 3-class {background, tooth, border} map for instance separation
 """
 from __future__ import annotations
@@ -18,9 +18,9 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from dentex.data.coco import instance_masks, load_dentex, semantic_mask
+from dentex.data.coco import instance_labels, instance_masks, load_dentex, semantic_mask
 from dentex.data.dataset import SIZE, resize_pair
-from dentex.data.refine import add_border_class, remove_overlaps
+from dentex.data.refine import add_border_class, separate_teeth
 
 
 def main() -> None:
@@ -30,7 +30,8 @@ def main() -> None:
     p.add_argument("--task", required=True, choices=["quadrant", "enumeration", "disease"])
     p.add_argument("--out", required=True)
     p.add_argument("--refine", default="none", choices=["none", "overlap", "border"])
-    p.add_argument("--border-width", type=int, default=3)
+    p.add_argument("--gap", type=int, default=6, help="pixels by which teeth are grown before cutting overlaps")
+    p.add_argument("--border-size", type=int, default=5)
     args = p.parse_args()
 
     out = Path(args.out)
@@ -41,11 +42,10 @@ def main() -> None:
     for xray in tqdm(load_dentex(args.json), desc=f"masks [{args.task}/{args.refine}]"):
         semantic = semantic_mask(xray, args.task)
         if args.refine != "none":
-            inst = instance_masks(xray)
-            separated = remove_overlaps(inst)
-            semantic = np.where(separated > 0, semantic, 0).astype(np.uint8)
+            separated = separate_teeth(instance_masks(xray), instance_labels(xray, args.task), gap=args.gap)
+            semantic = separated.astype(np.uint8)
             if args.refine == "border":
-                semantic = add_border_class(separated, args.border_width)
+                semantic = add_border_class(separated, border_size=args.border_size)
 
         image = Image.open(Path(args.images) / xray.file_name)
         image, mask = resize_pair(image, Image.fromarray(semantic), SIZE)

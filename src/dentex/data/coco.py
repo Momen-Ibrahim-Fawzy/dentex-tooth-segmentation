@@ -79,6 +79,17 @@ def semantic_mask(xray: XRay, task: str) -> np.ndarray:
     return np.asarray(canvas, dtype=np.int32).astype(np.uint8)
 
 
+def instance_labels(xray: XRay, task: str) -> list[int]:
+    """Task label of every annotation, in the same order as :func:`instance_masks` (0 = not labelled)."""
+    out = []
+    for a in xray.annotations:
+        if (task == "disease" and a.disease is None) or (task == "enumeration" and a.tooth is None):
+            out.append(0)
+        else:
+            out.append(encode(task, a.quadrant, a.tooth, a.disease))
+    return out
+
+
 def instance_masks(xray: XRay) -> np.ndarray:
     """(N, H, W) boolean stack, one mask per annotated object (used to find overlaps)."""
     if not xray.annotations:

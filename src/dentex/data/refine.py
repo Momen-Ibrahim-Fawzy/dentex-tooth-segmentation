@@ -1,15 +1,17 @@
 """Mask refinement for tooth *instance* segmentation with a semantic network.
 
 A semantic U-Net cannot tell two touching teeth apart: neighbouring teeth merge
-into one blob and post-processing counts the wrong number of teeth. Two
-refinements of the training masks fix this:
+into one blob and post-processing counts the wrong number of teeth (for example
+13 teeth on an X-ray with far more). Two refinements of the training masks fix this:
 
-1. ``remove_overlaps``  pixels claimed by two annotated teeth become background,
-   so the ground truth itself contains a thin gap between neighbours.
-2. ``add_border_class`` the boundary band of every tooth gets its own class.
-   The network learns to predict borders explicitly; at inference, tooth cores
-   (tooth minus border) are separated components that can be counted and then
-   grown back to full teeth (see :mod:`dentex.postprocess.instances`).
+1. ``separate_teeth``  every tooth is grown by ``gap`` pixels; wherever it meets an
+   already-drawn tooth, the (also grown) intersection is cut out of the mask.
+   The ground truth then contains a clear gap between neighbouring teeth.
+2. ``add_border_class``  the mask is eroded slightly and dilated by
+   ``border_size``; the band between the two is labelled as a separate *border*
+   class. The network learns to predict borders explicitly, and at inference the
+   tooth cores (tooth minus border) are separate components that can be counted
+   and grown back to full teeth (see :mod:`dentex.postprocess.instances`).
 """
 from __future__ import annotations
 
@@ -19,13 +21,40 @@ from scipy import ndimage
 BACKGROUND, TOOTH, BORDER = 0, 1, 2
 
 
-def remove_overlaps(instances: np.ndarray, labels: np.ndarray | None = None) -> np.ndarray:
-    """instances: (N,H,W) bool. Returns an (H,W) label map where overlapping pixels are 0.
+def _square(size: int) -> np.ndarray:
+    return np.ones((2 * size + 1, 2 * size + 1), dtype=bool)
 
-    ``labels`` gives the value written for each instance (default 1..N).
+
+def separate_teeth(instances: np.ndarray, labels: np.ndarray | None = None, gap: int = 6) -> np.ndarray:
+    """instances: (N,H,W) bool masks in drawing order. Returns an (H,W) label map with gaps.
+
+    Mirrors drawing the polygons one by one: tooth k is grown by ``gap``, its
+    intersection with every previously drawn tooth is grown by ``gap`` again and
+    erased from both. ``labels`` gives the value for each tooth (default 1..N).
     """
     if instances.size == 0:
-        return np.zeros(instances.shape[1:], dtype=np.uint8)
+        return np.zeros(instances.shape[1:], dtype=np.int32)
+    labels = np.arange(1, len(instances) + 1) if labels is None else np.asarray(labels)
+    grow = _square(gap) if gap > 0 else None
+    out = np.zeros(instances.shape[1:], dtype=np.int32)
+    drawn = np.zeros(instances.shape[1:], dtype=bool)
+    for inst, value in zip(instances, labels):
+        current = ndimage.binary_dilation(inst, grow) if grow is not None else inst.copy()
+        overlap = current & drawn
+        if overlap.any():
+            if grow is not None:
+                overlap = ndimage.binary_dilation(overlap, grow)
+            out[overlap] = 0
+            current &= ~overlap
+        out[current] = value
+        drawn |= current
+    return out
+
+
+def remove_overlaps(instances: np.ndarray, labels: np.ndarray | None = None) -> np.ndarray:
+    """Strictest variant: only pixels claimed by two or more teeth become background (no gap)."""
+    if instances.size == 0:
+        return np.zeros(instances.shape[1:], dtype=np.int32)
     labels = np.arange(1, len(instances) + 1) if labels is None else np.asarray(labels)
     count = instances.sum(axis=0)
     out = np.zeros(instances.shape[1:], dtype=np.int32)
@@ -34,21 +63,17 @@ def remove_overlaps(instances: np.ndarray, labels: np.ndarray | None = None) -> 
     return out
 
 
-def add_border_class(instance_map: np.ndarray, width: int = 2) -> np.ndarray:
-    """instance_map: (H,W) ints, 0 = background, k = instance k. Returns {0 bg, 1 tooth, 2 border}."""
-    out = np.where(instance_map > 0, TOOTH, BACKGROUND).astype(np.uint8)
-    structure = ndimage.generate_binary_structure(2, 1)
-    for k in np.unique(instance_map):
-        if k == 0:
-            continue
-        inst = instance_map == k
-        eroded = ndimage.binary_erosion(inst, structure, iterations=width)
-        out[inst & ~eroded] = BORDER
-    return out
+def add_border_class(mask: np.ndarray, border_size: int = 5, n_erosions: int = 1) -> np.ndarray:
+    """mask: (H,W), any value > 0 is tooth. Returns {0 background, 1 tooth, 2 border}.
 
-
-def multiclass_with_border(semantic: np.ndarray, border_mask: np.ndarray, border_label: int) -> np.ndarray:
-    """Keeps task classes (quadrant / enumeration) but overwrites borders with an extra class."""
-    out = semantic.astype(np.int32).copy()
-    out[border_mask] = border_label
+    Erode by ``n_erosions`` (3x3), then dilate the eroded mask with a
+    (2*border_size+1)^2 square: eroded pixels are tooth, the remaining dilated
+    band (inside and outside the original outline) is border.
+    """
+    tooth = np.asarray(mask) > 0
+    eroded = ndimage.binary_erosion(tooth, np.ones((3, 3), bool), iterations=n_erosions) if n_erosions else tooth
+    dilated = ndimage.binary_dilation(eroded, _square(border_size))
+    out = np.zeros(tooth.shape, dtype=np.uint8)
+    out[dilated] = BORDER
+    out[eroded] = TOOTH
     return out
